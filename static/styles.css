@@ -114,9 +114,14 @@ h2 {
 
 .upload-form,
 .filter-form,
-.manage-form {
+.manage-form,
+.utility-form {
     display: grid;
     gap: 18px;
+}
+
+.utility-form {
+    margin-bottom: 18px;
 }
 
 .file-drop {
@@ -221,7 +226,7 @@ h2 {
 }
 
 .filter-form {
-    grid-template-columns: minmax(220px, 1.4fr) minmax(160px, 1fr) minmax(160px, 1fr) auto;
+    grid-template-columns: minmax(200px, 1.4fr) repeat(3, minmax(140px, 1fr)) auto;
     align-items: end;
     margin-bottom: 22px;
 }
@@ -307,6 +312,12 @@ textarea:focus {
     transform: translateY(-1px);
 }
 
+.submit-button:disabled {
+    cursor: wait;
+    opacity: 0.72;
+    transform: none;
+}
+
 .secondary-button {
     border: 1px solid var(--blue);
     background: #f3f7ff;
@@ -351,6 +362,37 @@ textarea:focus {
     color: var(--blue);
 }
 
+.upload-progress {
+    position: relative;
+    min-height: 36px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    border: 1px solid #c9d8f2;
+    border-radius: 8px;
+    background: #eef5ff;
+    color: var(--blue);
+    font-size: 0.9rem;
+    font-weight: 850;
+}
+
+.upload-progress[hidden] {
+    display: none;
+}
+
+.upload-progress-bar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 0;
+    background: rgba(29, 101, 216, 0.16);
+    transition: width 120ms ease;
+}
+
+.upload-progress span {
+    position: relative;
+    z-index: 1;
+}
+
 .video-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -391,19 +433,37 @@ textarea:focus {
     font-weight: 650;
 }
 
+.video-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.video-facts span {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    color: #4b5563;
+    padding: 4px 8px;
+    font-size: 0.78rem;
+    font-weight: 800;
+}
+
 .video-notes {
     border-left: 3px solid #c9d8f2;
     padding-left: 10px;
     line-height: 1.45;
 }
 
-.tag-list {
+.tag-list,
+.collection-list {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
 }
 
-.tag {
+.tag,
+.collection {
     border: 1px solid #c9d8f2;
     border-radius: 999px;
     background: #eef5ff;
@@ -412,6 +472,12 @@ textarea:focus {
     font-size: 0.82rem;
     font-weight: 800;
     text-decoration: none;
+}
+
+.collection {
+    border-color: #c9ead8;
+    background: #edf9f2;
+    color: var(--green);
 }
 
 .manage-panel {
@@ -503,4 +569,5 @@ textarea:focus {
     .video-card {
         padding: 12px;
     }
+
 }

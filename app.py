@@ -14,7 +14,8 @@ app.secret_key = "dev-secret-key"
 CONTENT_LIBRARY = "content_library"
 LIBRARY_INDEX = os.path.join(CONTENT_LIBRARY, "library.json")
 THUMBNAIL_LIBRARY = os.path.join(CONTENT_LIBRARY, "thumbnails")
-DEFAULT_CATEGORIES = ["Physique", "Workout", "Volleyball", "Food"]
+DEFAULT_CATEGORIES = ["physique", "workout", "volleyball", "food"]
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 os.makedirs(CONTENT_LIBRARY, exist_ok=True)
 os.makedirs(THUMBNAIL_LIBRARY, exist_ok=True)
 
@@ -47,8 +48,17 @@ def parse_tags(raw_tags):
     return tags
 
 
+def parse_collections(raw_collections):
+    return parse_tags(raw_collections)
+
+
 def normalize_slug(value):
     return secure_filename(value.strip().lower())
+
+
+def display_name_from_filename(filename):
+    stem, _ = os.path.splitext(filename)
+    return stem.replace("_", " ").replace("-", " ").strip().lower()
 
 
 def normalize_thumbnail_time(raw_time):
@@ -93,6 +103,86 @@ def find_ffmpeg():
     return matches[0] if matches else ""
 
 
+def find_ffprobe():
+    ffprobe_path = shutil.which("ffprobe")
+
+    if ffprobe_path:
+        return ffprobe_path
+
+    ffmpeg_path = find_ffmpeg()
+
+    if ffmpeg_path:
+        ffprobe_path = os.path.join(os.path.dirname(ffmpeg_path), "ffprobe.exe")
+
+        if os.path.exists(ffprobe_path):
+            return ffprobe_path
+
+    return ""
+
+
+def format_duration(duration_seconds):
+    if not duration_seconds:
+        return ""
+
+    whole_seconds = int(duration_seconds)
+    minutes = whole_seconds // 60
+    seconds = whole_seconds % 60
+
+    if minutes < 60:
+        return f"{minutes}:{seconds:02d}"
+
+    hours = minutes // 60
+    minutes = minutes % 60
+    return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+
+def format_file_size(size):
+    if not size:
+        return ""
+
+    units = ["B", "KB", "MB", "GB"]
+    value = float(size)
+
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} {unit}"
+
+        value /= 1024
+
+    return ""
+
+
+def get_video_duration(video_path):
+    ffprobe_path = find_ffprobe()
+
+    if not ffprobe_path:
+        return 0
+
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return 0
+
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
 def create_thumbnail(video_path, video_id, thumbnail_time="00:00:01"):
     ffmpeg_path = find_ffmpeg()
 
@@ -127,27 +217,43 @@ def create_thumbnail(video_path, video_id, thumbnail_time="00:00:01"):
     return f"thumbnails/{thumbnail_filename}"
 
 
-def ensure_thumbnails(videos):
+def ensure_video_metadata(videos):
     changed = False
 
     for video in videos:
-        if video.get("thumbnail_path"):
-            continue
-
         video_path = library_file_path(video)
 
         if not os.path.exists(video_path):
             continue
 
-        thumbnail_path = create_thumbnail(
-            video_path,
-            video["id"],
-            video.get("thumbnail_time", "00:00:01"),
-        )
+        size = os.path.getsize(video_path)
 
-        if thumbnail_path:
-            video["thumbnail_path"] = thumbnail_path
+        if video.get("size") != size:
+            video["size"] = size
             changed = True
+
+        if video.get("size_label") != format_file_size(size):
+            video["size_label"] = format_file_size(size)
+            changed = True
+
+        if not video.get("duration"):
+            duration = get_video_duration(video_path)
+
+            if duration:
+                video["duration"] = duration
+                video["duration_label"] = format_duration(duration)
+                changed = True
+
+        if not video.get("thumbnail_path"):
+            thumbnail_path = create_thumbnail(
+                video_path,
+                video["id"],
+                video.get("thumbnail_time", "00:00:01"),
+            )
+
+            if thumbnail_path:
+                video["thumbnail_path"] = thumbnail_path
+                changed = True
 
     if changed:
         save_library(videos)
@@ -187,14 +293,43 @@ def next_daily_sequence(videos, category, date, name):
     return highest_sequence + 1
 
 
+def video_entry_from_file(file_path, category, relative_path):
+    video_id = uuid.uuid4().hex
+    size = os.path.getsize(file_path)
+    duration = get_video_duration(file_path)
+    thumbnail_time = "00:00:01"
+    thumbnail_path = create_thumbnail(file_path, video_id, thumbnail_time)
+
+    return {
+        "id": video_id,
+        "name": display_name_from_filename(os.path.basename(file_path)),
+        "category": category,
+        "tags": [],
+        "collections": [],
+        "notes": "",
+        "thumbnail_time": thumbnail_time,
+        "filename": os.path.basename(file_path),
+        "path": relative_path,
+        "thumbnail_path": thumbnail_path,
+        "uploaded_at": datetime.fromtimestamp(os.path.getmtime(file_path)).isoformat(timespec="seconds"),
+        "size": size,
+        "size_label": format_file_size(size),
+        "duration": duration,
+        "duration_label": format_duration(duration),
+        "original_filename": os.path.basename(file_path),
+    }
+
+
 @app.route("/")
 def home():
     query = request.args.get("q", "").strip()
     selected_category = request.args.get("category", "").strip()
     selected_tag = request.args.get("tag", "").strip()
+    selected_collection = request.args.get("collection", "").strip()
+    sort = request.args.get("sort", "newest").strip()
 
     videos = load_library()
-    ensure_thumbnails(videos)
+    ensure_video_metadata(videos)
     saved_categories = [
         item
         for item in os.listdir(CONTENT_LIBRARY)
@@ -203,6 +338,14 @@ def home():
     metadata_categories = [video["category"] for video in videos]
     categories = sorted(set(DEFAULT_CATEGORIES + saved_categories + metadata_categories))
     all_tags = sorted({tag for video in videos for tag in video.get("tags", [])}, key=str.lower)
+    all_collections = sorted(
+        {
+            collection
+            for video in videos
+            for collection in video.get("collections", [])
+        },
+        key=str.lower,
+    )
 
     filtered_videos = videos
 
@@ -216,6 +359,13 @@ def home():
             video for video in filtered_videos if selected_tag in video.get("tags", [])
         ]
 
+    if selected_collection:
+        filtered_videos = [
+            video
+            for video in filtered_videos
+            if selected_collection in video.get("collections", [])
+        ]
+
     if query:
         query_lower = query.lower()
         filtered_videos = [
@@ -226,12 +376,37 @@ def home():
             or query_lower in video["filename"].lower()
             or query_lower in video.get("notes", "").lower()
             or any(query_lower in tag.lower() for tag in video.get("tags", []))
+            or any(
+                query_lower in collection.lower()
+                for collection in video.get("collections", [])
+            )
         ]
+
+    sort_options = {
+        "newest": "Newest",
+        "oldest": "Oldest",
+        "name": "Name",
+        "category": "Category",
+        "size": "File Size",
+        "duration": "Duration",
+    }
+
+    if sort not in sort_options:
+        sort = "newest"
+
+    sort_keys = {
+        "newest": lambda video: video.get("uploaded_at", ""),
+        "oldest": lambda video: video.get("uploaded_at", ""),
+        "name": lambda video: video.get("name", ""),
+        "category": lambda video: video.get("category", ""),
+        "size": lambda video: video.get("size", 0),
+        "duration": lambda video: video.get("duration", 0),
+    }
 
     filtered_videos = sorted(
         filtered_videos,
-        key=lambda video: video.get("uploaded_at", ""),
-        reverse=True,
+        key=sort_keys[sort],
+        reverse=sort in {"newest", "size", "duration"},
     )
 
     return render_template(
@@ -239,9 +414,13 @@ def home():
         categories=categories,
         videos=filtered_videos,
         all_tags=all_tags,
+        all_collections=all_collections,
         query=query,
         selected_category=selected_category,
         selected_tag=selected_tag,
+        selected_collection=selected_collection,
+        sort=sort,
+        sort_options=sort_options,
     )
 
 
@@ -254,11 +433,11 @@ def upload():
     ]
     category = request.form.get("category", "").strip()
     new_category = request.form.get("new_category", "").strip()
-    thumbnail_time = normalize_thumbnail_time(request.form.get("thumbnail_time", ""))
     name = request.form.get("name", "").strip()
     notes = request.form.get("notes", "").strip()
     thumbnail_time = normalize_thumbnail_time(request.form.get("thumbnail_time", ""))
     tags = parse_tags(request.form.get("tags", ""))
+    collections = parse_collections(request.form.get("collections", ""))
 
     if not files:
         flash("Choose at least one video before uploading.", "error")
@@ -294,6 +473,7 @@ def upload():
         save_path = os.path.join(category_path, filename)
         file.save(save_path)
         video_id = uuid.uuid4().hex
+        duration = get_video_duration(save_path)
         thumbnail_path = create_thumbnail(save_path, video_id, thumbnail_time)
 
         videos.append(
@@ -302,6 +482,7 @@ def upload():
                 "name": display_name,
                 "category": category,
                 "tags": tags,
+                "collections": collections,
                 "notes": notes,
                 "thumbnail_time": thumbnail_time,
                 "filename": filename,
@@ -309,6 +490,9 @@ def upload():
                 "thumbnail_path": thumbnail_path,
                 "uploaded_at": datetime.now().isoformat(timespec="seconds"),
                 "size": os.path.getsize(save_path),
+                "size_label": format_file_size(os.path.getsize(save_path)),
+                "duration": duration,
+                "duration_label": format_duration(duration),
                 "original_filename": file.filename,
             }
         )
@@ -328,9 +512,91 @@ def video_file(video_path):
     return send_from_directory(CONTENT_LIBRARY, video_path)
 
 
+@app.route("/videos/<path:video_path>/download")
+def download_video(video_path):
+    directory, filename = os.path.split(video_path.replace("\\", "/"))
+    return send_from_directory(
+        os.path.join(CONTENT_LIBRARY, directory),
+        filename,
+        as_attachment=True,
+    )
+
+
 @app.route("/thumbnails/<path:thumbnail_path>")
 def thumbnail_file(thumbnail_path):
     return send_from_directory(THUMBNAIL_LIBRARY, thumbnail_path)
+
+
+@app.route("/import-existing", methods=["POST"])
+def import_existing():
+    videos = load_library()
+    known_paths = {video.get("path", "").replace("\\", "/") for video in videos}
+    imported_count = 0
+    skipped_count = 0
+
+    ignored_dirs = {"thumbnails", "trash", ".trash", "__pycache__"}
+
+    for root, dirs, files in os.walk(CONTENT_LIBRARY):
+        dirs[:] = [
+            directory
+            for directory in dirs
+            if directory.lower() not in ignored_dirs
+        ]
+
+        if root == CONTENT_LIBRARY:
+            continue
+
+        relative_root = os.path.relpath(root, CONTENT_LIBRARY).replace("\\", "/")
+        category = normalize_slug(relative_root.split("/")[0])
+
+        if not category:
+            continue
+
+        for filename in files:
+            _, extension = os.path.splitext(filename)
+
+            if extension.lower() not in VIDEO_EXTENSIONS:
+                continue
+
+            relative_path = f"{relative_root}/{filename}".replace("\\", "/")
+
+            if relative_path in known_paths:
+                skipped_count += 1
+                continue
+
+            file_path = os.path.join(root, filename)
+            videos.append(video_entry_from_file(file_path, category, relative_path))
+            known_paths.add(relative_path)
+            imported_count += 1
+
+    save_library(videos)
+
+    if imported_count:
+        flash(f"Imported {imported_count} existing videos. Skipped {skipped_count} already in the library.", "success")
+    else:
+        flash(f"No new videos found. Skipped {skipped_count} already in the library.", "success")
+
+    return redirect(url_for("home"))
+
+
+@app.route("/videos/<video_id>/open-folder", methods=["POST"])
+def open_video_folder(video_id):
+    _, video = find_video(video_id)
+
+    if not video:
+        flash("That video could not be found.", "error")
+        return redirect(url_for("home"))
+
+    file_path = library_file_path(video)
+    folder_path = os.path.dirname(file_path)
+
+    if not os.path.exists(folder_path):
+        flash("That folder could not be found.", "error")
+        return redirect(url_for("home"))
+
+    os.startfile(folder_path)
+    flash(f"Opened folder for {video['name']}.", "success")
+    return redirect(url_for("home"))
 
 
 @app.route("/videos/<video_id>/update", methods=["POST"])
@@ -344,6 +610,7 @@ def update_video(video_id):
     name = request.form.get("name", "").strip()
     category = request.form.get("category", "").strip()
     new_category = request.form.get("new_category", "").strip()
+    thumbnail_time = normalize_thumbnail_time(request.form.get("thumbnail_time", ""))
 
     if category == "Other":
         category = new_category
@@ -371,6 +638,7 @@ def update_video(video_id):
     video["name"] = name
     video["category"] = category
     video["tags"] = parse_tags(request.form.get("tags", ""))
+    video["collections"] = parse_collections(request.form.get("collections", ""))
     video["notes"] = request.form.get("notes", "").strip()
 
     if thumbnail_time != video.get("thumbnail_time"):
@@ -401,9 +669,12 @@ def delete_video(video_id):
     if os.path.exists(file_path):
         os.remove(file_path)
 
-    thumbnail_path = video.get("thumbnail_path")
+    thumbnail_paths = {video.get("thumbnail_path")}
 
-    if thumbnail_path:
+    for thumbnail_path in thumbnail_paths:
+        if not thumbnail_path:
+            continue
+
         thumbnail_file_path = os.path.join(
             CONTENT_LIBRARY,
             *thumbnail_path.replace("\\", "/").split("/"),

@@ -29,7 +29,11 @@
                 {% endif %}
             {% endwith %}
 
-            <form action="/upload" method="POST" enctype="multipart/form-data" class="upload-form">
+            <form action="{{ url_for('import_existing') }}" method="POST" class="utility-form">
+                <button type="submit" class="secondary-button">Import Existing Videos</button>
+            </form>
+
+            <form action="/upload" method="POST" enctype="multipart/form-data" class="upload-form" id="upload-form">
                 <label class="file-drop">
                     <input type="file" name="video" id="video-input" accept="video/*" multiple required>
                     <span class="file-icon" aria-hidden="true">
@@ -79,6 +83,11 @@
                 </label>
 
                 <label class="field">
+                    <span>Collections</span>
+                    <input type="text" name="collections" placeholder="may progress, videos to edit">
+                </label>
+
+                <label class="field">
                     <span>Thumbnail Time</span>
                     <input type="text" name="thumbnail_time" id="thumbnail-time" value="00:00:01" placeholder="1 or 00:00:01">
                 </label>
@@ -94,6 +103,11 @@
                     </svg>
                     Upload Video
                 </button>
+
+                <div class="upload-progress" id="upload-progress" hidden>
+                    <div class="upload-progress-bar" id="upload-progress-bar"></div>
+                    <span id="upload-progress-text">Uploading 0%</span>
+                </div>
             </form>
         </section>
 
@@ -132,6 +146,25 @@
                     </select>
                 </label>
 
+                <label class="field">
+                    <span>Collection</span>
+                    <select name="collection">
+                        <option value="">All Collections</option>
+                        {% for collection in all_collections %}
+                            <option value="{{ collection }}" {% if collection == selected_collection %}selected{% endif %}>{{ collection }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Sort</span>
+                    <select name="sort">
+                        {% for value, label in sort_options.items() %}
+                            <option value="{{ value }}" {% if value == sort %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
                 <div class="filter-actions">
                     <button type="submit" class="secondary-button">Filter</button>
                     <a href="/" class="text-link">Clear</a>
@@ -152,7 +185,19 @@
                             <div class="video-details">
                                 <div>
                                     <h3>{{ video.name }}</h3>
-                                    <p>{{ video.category }} &middot; {{ video.uploaded_at[:10] }}{% if video.thumbnail_time %} &middot; thumbnail {{ video.thumbnail_time }}{% endif %}</p>
+                                    <p>{{ video.category }} &middot; {{ video.uploaded_at[:10] }}</p>
+                                </div>
+
+                                <div class="video-facts" aria-label="Video details">
+                                    {% if video.duration_label %}
+                                        <span>{{ video.duration_label }}</span>
+                                    {% endif %}
+                                    {% if video.size_label %}
+                                        <span>{{ video.size_label }}</span>
+                                    {% endif %}
+                                    {% if video.thumbnail_time %}
+                                        <span>thumb {{ video.thumbnail_time }}</span>
+                                    {% endif %}
                                 </div>
 
                                 {% if video.notes %}
@@ -163,6 +208,14 @@
                                     <div class="tag-list" aria-label="Tags">
                                         {% for tag in video.tags %}
                                             <a class="tag" href="{{ url_for('home', tag=tag) }}">{{ tag }}</a>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+
+                                {% if video.collections %}
+                                    <div class="collection-list" aria-label="Collections">
+                                        {% for collection in video.collections %}
+                                            <a class="collection" href="{{ url_for('home', collection=collection) }}">{{ collection }}</a>
                                         {% endfor %}
                                     </div>
                                 {% endif %}
@@ -198,6 +251,11 @@
                                     </label>
 
                                     <label class="field">
+                                        <span>Collections</span>
+                                        <input type="text" name="collections" value="{{ video.collections|join(', ') }}" placeholder="may progress, videos to edit">
+                                    </label>
+
+                                    <label class="field">
                                         <span>Thumbnail Time</span>
                                         <input type="text" name="thumbnail_time" value="{{ video.thumbnail_time or '00:00:01' }}" placeholder="1 or 00:00:01">
                                     </label>
@@ -209,6 +267,12 @@
 
                                     <button type="submit" class="secondary-button">Save Changes</button>
                                 </form>
+
+                                <form action="{{ url_for('open_video_folder', video_id=video.id) }}" method="POST">
+                                    <button type="submit" class="secondary-button">Open Folder</button>
+                                </form>
+
+                                <a class="secondary-button" href="{{ url_for('download_video', video_path=video.path) }}">Download Video</a>
 
                                 <form action="{{ url_for('delete_video', video_id=video.id) }}" method="POST">
                                     <button type="submit" class="danger-button" onclick="return confirm('Delete this video?')">Delete Video</button>
@@ -235,6 +299,10 @@
         const thumbnailTime = document.querySelector("#thumbnail-time");
         const previewFilename = document.querySelector("#preview-filename");
         const previewTime = document.querySelector("#preview-time");
+        const uploadForm = document.querySelector("#upload-form");
+        const uploadProgress = document.querySelector("#upload-progress");
+        const uploadProgressBar = document.querySelector("#upload-progress-bar");
+        const uploadProgressText = document.querySelector("#upload-progress-text");
         let previewUrl = "";
 
         function syncNewCategoryField() {
@@ -288,6 +356,46 @@
 
         thumbnailPreview.addEventListener("seeked", updateThumbnailTime);
         thumbnailPreview.addEventListener("pause", updateThumbnailTime);
+
+        uploadForm.addEventListener("submit", (event) => {
+            if (!window.XMLHttpRequest) {
+                return;
+            }
+
+            event.preventDefault();
+
+            const request = new XMLHttpRequest();
+            const formData = new FormData(uploadForm);
+            const submitButton = uploadForm.querySelector(".submit-button");
+
+            uploadProgress.hidden = false;
+            uploadProgressBar.style.width = "0%";
+            uploadProgressText.textContent = "Uploading 0%";
+            submitButton.disabled = true;
+
+            request.upload.addEventListener("progress", (progressEvent) => {
+                if (!progressEvent.lengthComputable) {
+                    uploadProgressText.textContent = "Uploading...";
+                    return;
+                }
+
+                const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+                uploadProgressBar.style.width = `${percent}%`;
+                uploadProgressText.textContent = `Uploading ${percent}%`;
+            });
+
+            request.addEventListener("load", () => {
+                window.location.href = "/";
+            });
+
+            request.addEventListener("error", () => {
+                submitButton.disabled = false;
+                uploadProgressText.textContent = "Upload failed. Try again.";
+            });
+
+            request.open("POST", uploadForm.action);
+            request.send(formData);
+        });
 
         document.querySelectorAll(".manage-category-select").forEach((select) => {
             const newCategoryField = select
