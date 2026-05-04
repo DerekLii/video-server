@@ -226,9 +226,13 @@ h2 {
 }
 
 .filter-form {
-    grid-template-columns: minmax(200px, 1.4fr) repeat(3, minmax(140px, 1fr)) auto;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     align-items: end;
     margin-bottom: 22px;
+}
+
+.filter-form .field:first-child {
+    grid-column: span 2;
 }
 
 .field {
@@ -399,6 +403,50 @@ textarea:focus {
     gap: 18px;
 }
 
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.stat-card {
+    display: grid;
+    gap: 4px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fbfcfe;
+    padding: 12px;
+}
+
+.stat-card span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.stat-card strong {
+    font-size: 1.28rem;
+}
+
+.stats-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.stats-line span {
+    border: 1px solid #c9d8f2;
+    border-radius: 999px;
+    background: #eef5ff;
+    color: var(--blue);
+    padding: 5px 9px;
+    font-size: 0.82rem;
+    font-weight: 800;
+}
+
 .video-card {
     display: grid;
     gap: 14px;
@@ -503,6 +551,58 @@ textarea:focus {
     text-align: center;
 }
 
+.trash-panel {
+    margin-top: 24px;
+    border-top: 1px solid var(--line);
+    padding-top: 18px;
+}
+
+.trash-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.trash-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.trash-header p {
+    margin: 0;
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.trash-list {
+    display: grid;
+    gap: 10px;
+}
+
+.trash-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fbfcfe;
+    padding: 12px;
+}
+
+.trash-item div {
+    display: grid;
+    gap: 3px;
+}
+
+.trash-item span {
+    color: var(--muted);
+    font-size: 0.9rem;
+    font-weight: 650;
+}
+
 @media (max-width: 680px) {
     .shell {
         width: min(100% - 20px, 920px);
@@ -521,8 +621,13 @@ textarea:focus {
     .panel-header,
     .field-grid,
     .filter-form,
+    .stats-grid,
     .video-grid {
         grid-template-columns: 1fr;
+    }
+
+    .filter-form .field:first-child {
+        grid-column: auto;
     }
 
     .panel-header {
@@ -568,6 +673,11 @@ textarea:focus {
 
     .video-card {
         padding: 12px;
+    }
+
+    .trash-header,
+    .trash-item {
+        display: grid;
     }
 
 }

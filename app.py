@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, flash, redirect, render_template, request, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 import glob
@@ -14,10 +14,12 @@ app.secret_key = "dev-secret-key"
 CONTENT_LIBRARY = "content_library"
 LIBRARY_INDEX = os.path.join(CONTENT_LIBRARY, "library.json")
 THUMBNAIL_LIBRARY = os.path.join(CONTENT_LIBRARY, "thumbnails")
+TRASH_LIBRARY = os.path.join(CONTENT_LIBRARY, "trash")
 DEFAULT_CATEGORIES = ["physique", "workout", "volleyball", "food"]
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 os.makedirs(CONTENT_LIBRARY, exist_ok=True)
 os.makedirs(THUMBNAIL_LIBRARY, exist_ok=True)
+os.makedirs(TRASH_LIBRARY, exist_ok=True)
 
 
 def load_library():
@@ -80,6 +82,75 @@ def normalize_thumbnail_time(raw_time):
 
 def library_file_path(video):
     return os.path.join(CONTENT_LIBRARY, *video["path"].replace("\\", "/").split("/"))
+
+
+def video_uploaded_date(video):
+    uploaded_at = video.get("uploaded_at", "")
+
+    try:
+        return datetime.fromisoformat(uploaded_at).date()
+    except ValueError:
+        return None
+
+
+def date_filter_range(date_filter, custom_from, custom_to):
+    today = datetime.now().date()
+
+    if date_filter == "today":
+        return today, today
+
+    if date_filter == "week":
+        return today - timedelta(days=6), today
+
+    if date_filter == "month":
+        return today.replace(day=1), today
+
+    if date_filter == "custom":
+        try:
+            start_date = datetime.fromisoformat(custom_from).date() if custom_from else None
+            end_date = datetime.fromisoformat(custom_to).date() if custom_to else None
+        except ValueError:
+            return None, None
+
+        return start_date, end_date
+
+    return None, None
+
+
+def matches_date_filter(video, start_date, end_date):
+    if not start_date and not end_date:
+        return True
+
+    uploaded_date = video_uploaded_date(video)
+
+    if not uploaded_date:
+        return False
+
+    if start_date and uploaded_date < start_date:
+        return False
+
+    if end_date and uploaded_date > end_date:
+        return False
+
+    return True
+
+
+def unique_trash_path(filename):
+    trash_filename = f"{uuid.uuid4().hex}_{filename}"
+    return os.path.join(TRASH_LIBRARY, trash_filename), f"trash/{trash_filename}"
+
+
+def unique_restore_path(video):
+    original_path = video.get("original_path") or f"{video['category']}/{video['filename']}"
+    restore_path = os.path.join(CONTENT_LIBRARY, *original_path.split("/"))
+
+    if not os.path.exists(restore_path):
+        return restore_path, original_path
+
+    directory = os.path.dirname(restore_path)
+    stem, extension = os.path.splitext(os.path.basename(restore_path))
+    restored_filename = f"{stem}_restored_{uuid.uuid4().hex[:6]}{extension}"
+    return os.path.join(directory, restored_filename), f"{video['category']}/{restored_filename}"
 
 
 def find_ffmpeg():
@@ -320,34 +391,71 @@ def video_entry_from_file(file_path, category, relative_path):
     }
 
 
+def library_stats(videos):
+    active_videos = [video for video in videos if not video.get("trashed")]
+    trashed_videos = [video for video in videos if video.get("trashed")]
+    total_size = sum(video.get("size", 0) for video in active_videos)
+    total_duration = sum(video.get("duration", 0) for video in active_videos)
+    category_counts = {}
+
+    for video in active_videos:
+        category = video.get("category", "uncategorized")
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    top_categories = sorted(
+        category_counts.items(),
+        key=lambda item: (-item[1], item[0]),
+    )[:4]
+
+    return {
+        "total_videos": len(active_videos),
+        "trashed_videos": len(trashed_videos),
+        "total_size": format_file_size(total_size),
+        "total_duration": format_duration(total_duration),
+        "top_categories": top_categories,
+    }
+
+
 @app.route("/")
 def home():
     query = request.args.get("q", "").strip()
     selected_category = request.args.get("category", "").strip()
     selected_tag = request.args.get("tag", "").strip()
     selected_collection = request.args.get("collection", "").strip()
+    date_filter = request.args.get("date", "").strip()
+    custom_from = request.args.get("from", "").strip()
+    custom_to = request.args.get("to", "").strip()
     sort = request.args.get("sort", "newest").strip()
 
     videos = load_library()
     ensure_video_metadata(videos)
+    stats = library_stats(videos)
+    active_videos = [video for video in videos if not video.get("trashed")]
+    trashed_videos = sorted(
+        [video for video in videos if video.get("trashed")],
+        key=lambda video: video.get("deleted_at", ""),
+        reverse=True,
+    )
     saved_categories = [
         item
         for item in os.listdir(CONTENT_LIBRARY)
         if os.path.isdir(os.path.join(CONTENT_LIBRARY, item))
+        and item.lower() not in {"thumbnails", "trash", ".trash", "__pycache__"}
     ]
-    metadata_categories = [video["category"] for video in videos]
+    metadata_categories = [video["category"] for video in active_videos]
     categories = sorted(set(DEFAULT_CATEGORIES + saved_categories + metadata_categories))
-    all_tags = sorted({tag for video in videos for tag in video.get("tags", [])}, key=str.lower)
+    all_tags = sorted({tag for video in active_videos for tag in video.get("tags", [])}, key=str.lower)
     all_collections = sorted(
         {
             collection
-            for video in videos
+            for video in active_videos
             for collection in video.get("collections", [])
         },
         key=str.lower,
     )
 
-    filtered_videos = videos
+    filtered_videos = active_videos
+    start_date, end_date = date_filter_range(date_filter, custom_from, custom_to)
 
     if selected_category:
         filtered_videos = [
@@ -365,6 +473,12 @@ def home():
             for video in filtered_videos
             if selected_collection in video.get("collections", [])
         ]
+
+    filtered_videos = [
+        video
+        for video in filtered_videos
+        if matches_date_filter(video, start_date, end_date)
+    ]
 
     if query:
         query_lower = query.lower()
@@ -415,10 +529,15 @@ def home():
         videos=filtered_videos,
         all_tags=all_tags,
         all_collections=all_collections,
+        stats=stats,
+        trashed_videos=trashed_videos,
         query=query,
         selected_category=selected_category,
         selected_tag=selected_tag,
         selected_collection=selected_collection,
+        date_filter=date_filter,
+        custom_from=custom_from,
+        custom_to=custom_to,
         sort=sort,
         sort_options=sort_options,
     )
@@ -664,29 +783,56 @@ def delete_video(video_id):
         flash("That video could not be found.", "error")
         return redirect(url_for("home"))
 
+    if video.get("trashed"):
+        flash("That video is already in trash.", "success")
+        return redirect(url_for("home"))
+
     file_path = library_file_path(video)
 
     if os.path.exists(file_path):
-        os.remove(file_path)
+        trash_path, trash_relative_path = unique_trash_path(video["filename"])
+        os.replace(file_path, trash_path)
+        video["original_path"] = video.get("path", "")
+        video["path"] = trash_relative_path
 
-    thumbnail_paths = {video.get("thumbnail_path")}
-
-    for thumbnail_path in thumbnail_paths:
-        if not thumbnail_path:
-            continue
-
-        thumbnail_file_path = os.path.join(
-            CONTENT_LIBRARY,
-            *thumbnail_path.replace("\\", "/").split("/"),
-        )
-
-        if os.path.exists(thumbnail_file_path):
-            os.remove(thumbnail_file_path)
-
-    videos = [item for item in videos if item["id"] != video_id]
+    video["trashed"] = True
+    video["deleted_at"] = datetime.now().isoformat(timespec="seconds")
     save_library(videos)
 
-    flash(f"Deleted {video['name']}.", "success")
+    flash(f"Moved {video['name']} to trash.", "success")
+    return redirect(url_for("home"))
+
+
+@app.route("/videos/<video_id>/restore", methods=["POST"])
+def restore_video(video_id):
+    videos, video = find_video(video_id)
+
+    if not video:
+        flash("That video could not be found.", "error")
+        return redirect(url_for("home"))
+
+    if not video.get("trashed"):
+        flash("That video is already in the library.", "success")
+        return redirect(url_for("home"))
+
+    trash_path = library_file_path(video)
+
+    if not os.path.exists(trash_path):
+        flash("That trashed video file could not be found.", "error")
+        return redirect(url_for("home"))
+
+    restore_path, restore_relative_path = unique_restore_path(video)
+    os.makedirs(os.path.dirname(restore_path), exist_ok=True)
+    os.replace(trash_path, restore_path)
+
+    video["path"] = restore_relative_path
+    video["filename"] = os.path.basename(restore_relative_path)
+    video["trashed"] = False
+    video.pop("deleted_at", None)
+    video.pop("original_path", None)
+    save_library(videos)
+
+    flash(f"Restored {video['name']}.", "success")
     return redirect(url_for("home"))
 
 

@@ -120,6 +120,33 @@
                 <div class="status-pill">{{ videos|length }} videos</div>
             </div>
 
+            <div class="stats-grid" aria-label="Library stats">
+                <div class="stat-card">
+                    <span>Videos</span>
+                    <strong>{{ stats.total_videos }}</strong>
+                </div>
+                <div class="stat-card">
+                    <span>Storage</span>
+                    <strong>{{ stats.total_size or "0 B" }}</strong>
+                </div>
+                <div class="stat-card">
+                    <span>Duration</span>
+                    <strong>{{ stats.total_duration or "0:00" }}</strong>
+                </div>
+                <div class="stat-card">
+                    <span>Trash</span>
+                    <strong>{{ stats.trashed_videos }}</strong>
+                </div>
+            </div>
+
+            {% if stats.top_categories %}
+                <div class="stats-line">
+                    {% for category, count in stats.top_categories %}
+                        <span>{{ category }}: {{ count }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
             <form action="/" method="GET" class="filter-form">
                 <label class="field">
                     <span>Search</span>
@@ -154,6 +181,27 @@
                             <option value="{{ collection }}" {% if collection == selected_collection %}selected{% endif %}>{{ collection }}</option>
                         {% endfor %}
                     </select>
+                </label>
+
+                <label class="field">
+                    <span>Date</span>
+                    <select name="date">
+                        <option value="" {% if not date_filter %}selected{% endif %}>Any Date</option>
+                        <option value="today" {% if date_filter == "today" %}selected{% endif %}>Today</option>
+                        <option value="week" {% if date_filter == "week" %}selected{% endif %}>Last 7 Days</option>
+                        <option value="month" {% if date_filter == "month" %}selected{% endif %}>This Month</option>
+                        <option value="custom" {% if date_filter == "custom" %}selected{% endif %}>Custom</option>
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>From</span>
+                    <input type="date" name="from" value="{{ custom_from }}">
+                </label>
+
+                <label class="field">
+                    <span>To</span>
+                    <input type="date" name="to" value="{{ custom_to }}">
                 </label>
 
                 <label class="field">
@@ -275,7 +323,7 @@
                                 <a class="secondary-button" href="{{ url_for('download_video', video_path=video.path) }}">Download Video</a>
 
                                 <form action="{{ url_for('delete_video', video_id=video.id) }}" method="POST">
-                                    <button type="submit" class="danger-button" onclick="return confirm('Delete this video?')">Delete Video</button>
+                                    <button type="submit" class="danger-button" onclick="return confirm('Move this video to trash?')">Move to Trash</button>
                                 </form>
                             </details>
                         </article>
@@ -286,6 +334,29 @@
                     <h3>No videos found</h3>
                     <p>Upload a video or loosen the filters to see your library here.</p>
                 </div>
+            {% endif %}
+
+            {% if trashed_videos %}
+                <section class="trash-panel" aria-labelledby="trash-title">
+                    <div class="trash-header">
+                        <h3 id="trash-title">Trash</h3>
+                        <p>{{ trashed_videos|length }} videos can be restored.</p>
+                    </div>
+
+                    <div class="trash-list">
+                        {% for video in trashed_videos %}
+                            <div class="trash-item">
+                                <div>
+                                    <strong>{{ video.name }}</strong>
+                                    <span>{{ video.category }} &middot; deleted {{ video.deleted_at[:10] }}</span>
+                                </div>
+                                <form action="{{ url_for('restore_video', video_id=video.id) }}" method="POST">
+                                    <button type="submit" class="secondary-button">Restore</button>
+                                </form>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </section>
             {% endif %}
         </section>
     </main>
