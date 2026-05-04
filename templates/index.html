@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Library Upload</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+    <main class="shell">
+        <section class="upload-panel" aria-labelledby="page-title">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Content Library</p>
+                    <h1 id="page-title">Upload Video</h1>
+                </div>
+                <div class="status-pill">{{ categories|length }} categories</div>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="messages" aria-live="polite">
+                        {% for category, message in messages %}
+                            <p class="message {{ category }}">{{ message }}</p>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            <form action="/upload" method="POST" enctype="multipart/form-data" class="upload-form">
+                <label class="file-drop">
+                    <input type="file" name="video" id="video-input" accept="video/*" multiple required>
+                    <span class="file-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" role="img">
+                            <path d="M4 6.75A2.75 2.75 0 0 1 6.75 4h7.5A2.75 2.75 0 0 1 17 6.75v.64l2.35-1.17A1.15 1.15 0 0 1 21 7.25v9.5a1.15 1.15 0 0 1-1.65 1.03L17 16.61v.64A2.75 2.75 0 0 1 14.25 20h-7.5A2.75 2.75 0 0 1 4 17.25V6.75Zm2.75-1.25c-.69 0-1.25.56-1.25 1.25v10.5c0 .69.56 1.25 1.25 1.25h7.5c.69 0 1.25-.56 1.25-1.25V6.75c0-.69-.56-1.25-1.25-1.25h-7.5Zm10.25 3.57v5.86l2.5 1.25V7.82L17 9.07Z" />
+                        </svg>
+                    </span>
+                    <span class="file-copy">
+                        <strong>Select videos</strong>
+                        <small>Choose one or many MP4, MOV, or browser-supported video files</small>
+                    </span>
+                </label>
+
+                <div class="preview-panel" id="preview-panel" hidden>
+                    <video id="thumbnail-preview" controls preload="metadata"></video>
+                    <div class="preview-copy">
+                        <strong id="preview-filename">Preview</strong>
+                        <small id="preview-time">Thumbnail frame: 00:00:01</small>
+                    </div>
+                </div>
+
+                <div class="field-grid">
+                    <label class="field">
+                        <span>Name Prefix</span>
+                        <input type="text" name="name" placeholder="deadlift-practice" required>
+                    </label>
+
+                    <label class="field">
+                        <span>Category</span>
+                        <select name="category" id="category-select">
+                            {% for category in categories %}
+                                <option value="{{ category }}">{{ category }}</option>
+                            {% endfor %}
+                            <option value="Other">Create New</option>
+                        </select>
+                    </label>
+                </div>
+
+                <label class="field new-category" id="new-category-field">
+                    <span>New Category</span>
+                    <input type="text" name="new_category" placeholder="Highlights">
+                </label>
+
+                <label class="field">
+                    <span>Tags</span>
+                    <input type="text" name="tags" placeholder="deadlift, form check, PR">
+                </label>
+
+                <label class="field">
+                    <span>Thumbnail Time</span>
+                    <input type="text" name="thumbnail_time" id="thumbnail-time" value="00:00:01" placeholder="1 or 00:00:01">
+                </label>
+
+                <label class="field">
+                    <span>Notes</span>
+                    <textarea name="notes" placeholder="What should you remember about these videos?"></textarea>
+                </label>
+
+                <button type="submit" class="submit-button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 3.75a.75.75 0 0 1 .53.22l4 4a.75.75 0 0 1-1.06 1.06l-2.72-2.72v9.94a.75.75 0 0 1-1.5 0V6.31L8.53 9.03a.75.75 0 0 1-1.06-1.06l4-4a.75.75 0 0 1 .53-.22ZM5.75 17a.75.75 0 0 1 .75.75v1.5h11v-1.5a.75.75 0 0 1 1.5 0V20a.75.75 0 0 1-.75.75H5.75A.75.75 0 0 1 5 20v-2.25a.75.75 0 0 1 .75-.75Z" />
+                    </svg>
+                    Upload Video
+                </button>
+            </form>
+        </section>
+
+        <section class="library-panel" aria-labelledby="library-title">
+            <div class="panel-header">
+                <div>
+                    <p class="eyebrow">Browse</p>
+                    <h2 id="library-title">Video Library</h2>
+                </div>
+                <div class="status-pill">{{ videos|length }} videos</div>
+            </div>
+
+            <form action="/" method="GET" class="filter-form">
+                <label class="field">
+                    <span>Search</span>
+                    <input type="search" name="q" value="{{ query }}" placeholder="Name, tag, category">
+                </label>
+
+                <label class="field">
+                    <span>Category</span>
+                    <select name="category">
+                        <option value="">All Categories</option>
+                        {% for category in categories %}
+                            <option value="{{ category }}" {% if category == selected_category %}selected{% endif %}>{{ category }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label class="field">
+                    <span>Tag</span>
+                    <select name="tag">
+                        <option value="">All Tags</option>
+                        {% for tag in all_tags %}
+                            <option value="{{ tag }}" {% if tag == selected_tag %}selected{% endif %}>{{ tag }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <div class="filter-actions">
+                    <button type="submit" class="secondary-button">Filter</button>
+                    <a href="/" class="text-link">Clear</a>
+                </div>
+            </form>
+
+            {% if videos %}
+                <div class="video-grid">
+                    {% for video in videos %}
+                        <article class="video-card">
+                            <video
+                                controls
+                                preload="metadata"
+                                {% if video.thumbnail_path %}poster="{{ url_for('video_file', video_path=video.thumbnail_path) }}"{% endif %}
+                                src="{{ url_for('video_file', video_path=video.path) }}"
+                            ></video>
+
+                            <div class="video-details">
+                                <div>
+                                    <h3>{{ video.name }}</h3>
+                                    <p>{{ video.category }} &middot; {{ video.uploaded_at[:10] }}{% if video.thumbnail_time %} &middot; thumbnail {{ video.thumbnail_time }}{% endif %}</p>
+                                </div>
+
+                                {% if video.notes %}
+                                    <p class="video-notes">{{ video.notes }}</p>
+                                {% endif %}
+
+                                {% if video.tags %}
+                                    <div class="tag-list" aria-label="Tags">
+                                        {% for tag in video.tags %}
+                                            <a class="tag" href="{{ url_for('home', tag=tag) }}">{{ tag }}</a>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <details class="manage-panel">
+                                <summary>Manage</summary>
+
+                                <form action="{{ url_for('update_video', video_id=video.id) }}" method="POST" class="manage-form">
+                                    <label class="field">
+                                        <span>Name</span>
+                                        <input type="text" name="name" value="{{ video.name }}" required>
+                                    </label>
+
+                                    <label class="field">
+                                        <span>Category</span>
+                                        <select name="category" class="manage-category-select">
+                                            {% for category in categories %}
+                                                <option value="{{ category }}" {% if category == video.category %}selected{% endif %}>{{ category }}</option>
+                                            {% endfor %}
+                                            <option value="Other">Create New</option>
+                                        </select>
+                                    </label>
+
+                                    <label class="field manage-new-category">
+                                        <span>New Category</span>
+                                        <input type="text" name="new_category" placeholder="Highlights">
+                                    </label>
+
+                                    <label class="field">
+                                        <span>Tags</span>
+                                        <input type="text" name="tags" value="{{ video.tags|join(', ') }}" placeholder="deadlift, form check">
+                                    </label>
+
+                                    <label class="field">
+                                        <span>Thumbnail Time</span>
+                                        <input type="text" name="thumbnail_time" value="{{ video.thumbnail_time or '00:00:01' }}" placeholder="1 or 00:00:01">
+                                    </label>
+
+                                    <label class="field">
+                                        <span>Notes</span>
+                                        <textarea name="notes" placeholder="What should you remember about this video?">{{ video.notes or "" }}</textarea>
+                                    </label>
+
+                                    <button type="submit" class="secondary-button">Save Changes</button>
+                                </form>
+
+                                <form action="{{ url_for('delete_video', video_id=video.id) }}" method="POST">
+                                    <button type="submit" class="danger-button" onclick="return confirm('Delete this video?')">Delete Video</button>
+                                </form>
+                            </details>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <h3>No videos found</h3>
+                    <p>Upload a video or loosen the filters to see your library here.</p>
+                </div>
+            {% endif %}
+        </section>
+    </main>
+
+    <script>
+        const categorySelect = document.querySelector("#category-select");
+        const newCategoryField = document.querySelector("#new-category-field");
+        const videoInput = document.querySelector("#video-input");
+        const previewPanel = document.querySelector("#preview-panel");
+        const thumbnailPreview = document.querySelector("#thumbnail-preview");
+        const thumbnailTime = document.querySelector("#thumbnail-time");
+        const previewFilename = document.querySelector("#preview-filename");
+        const previewTime = document.querySelector("#preview-time");
+        let previewUrl = "";
+
+        function syncNewCategoryField() {
+            newCategoryField.classList.toggle("visible", categorySelect.value === "Other");
+        }
+
+        categorySelect.addEventListener("change", syncNewCategoryField);
+        syncNewCategoryField();
+
+        function formatPreviewTime(seconds) {
+            const wholeSeconds = Math.max(0, Math.floor(seconds));
+            const hours = Math.floor(wholeSeconds / 3600);
+            const minutes = Math.floor((wholeSeconds % 3600) / 60);
+            const remainingSeconds = wholeSeconds % 60;
+
+            return [hours, minutes, remainingSeconds]
+                .map((value) => String(value).padStart(2, "0"))
+                .join(":");
+        }
+
+        function updateThumbnailTime() {
+            const formattedTime = formatPreviewTime(thumbnailPreview.currentTime || 1);
+            thumbnailTime.value = formattedTime;
+            previewTime.textContent = `Thumbnail frame: ${formattedTime}`;
+        }
+
+        videoInput.addEventListener("change", () => {
+            const file = videoInput.files[0];
+
+            if (previewUrl) {
+                URL.revokeObjectURL(previewUrl);
+                previewUrl = "";
+            }
+
+            thumbnailTime.value = "00:00:01";
+            previewTime.textContent = "Thumbnail frame: 00:00:01";
+
+            if (!file) {
+                thumbnailPreview.removeAttribute("src");
+                previewPanel.hidden = true;
+                return;
+            }
+
+            previewUrl = URL.createObjectURL(file);
+            thumbnailPreview.src = previewUrl;
+            previewFilename.textContent = videoInput.files.length > 1
+                ? `${file.name} + ${videoInput.files.length - 1} more`
+                : file.name;
+            previewPanel.hidden = false;
+        });
+
+        thumbnailPreview.addEventListener("seeked", updateThumbnailTime);
+        thumbnailPreview.addEventListener("pause", updateThumbnailTime);
+
+        document.querySelectorAll(".manage-category-select").forEach((select) => {
+            const newCategoryField = select
+                .closest(".manage-form")
+                .querySelector(".manage-new-category");
+
+            function syncManageCategoryField() {
+                newCategoryField.classList.toggle("visible", select.value === "Other");
+            }
+
+            select.addEventListener("change", syncManageCategoryField);
+            syncManageCategoryField();
+        });
+    </script>
+</body>
+
+</html>
